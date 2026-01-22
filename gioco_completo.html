@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sfida di compleanno</title>
+    <style>
+        :root { --primary: #ff4081; --bg: #fff5f8; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg); overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        #game-box { width: 100%; max-width: 400px; height: 600px; background: white; border: 5px solid var(--primary); border-radius: 20px; position: relative; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+
+        .screen { position: absolute; inset: 0; display: none; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 25px; z-index: 10; background: white; }
+        .active { display: flex; }
+
+        #hud { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 20; font-weight: bold; color: var(--primary); display: none; background: rgba(255,255,255,0.8); padding: 5px 0; }
+        #play-field { width: 100%; height: 100%; position: relative; display: none; background: #fffcfc; cursor: crosshair; }
+        #basket { position: absolute; bottom: 20px; left: 50%; width: 80px; height: 45px; background: var(--primary); border-radius: 0 0 40px 40px; transform: translateX(-50%); color: white; display: flex; justify-content: center; align-items: center; font-size: 12px; pointer-events: none; z-index: 5; }
+
+        .obj { position: absolute; cursor: pointer; font-size: 35px; user-select: none; z-index: 4; }
+
+        button { background: var(--primary); color: white; border: none; padding: 15px 30px; border-radius: 30px; font-size: 18px; cursor: pointer; transition: 0.3s; margin-top: 20px; font-weight: bold; }
+        button:hover { transform: scale(1.05); }
+
+        #arena { width: 100%; height: 250px; background: #fefefe; border: 2px solid #eee; position: relative; margin: 15px 0; overflow: hidden; border-radius: 10px; }
+        .moving-bar { position: absolute; height: 100%; width: 6px; background: #ff4081; left: 0; }
+        .safe-zone { position: absolute; height: 100%; background: #4caf50; opacity: 0.4; }
+    </style>
+</head>
+<body>
+
+<div id="game-box">
+    <div id="hud">Livello: <span id="lvl-txt">1</span> | Punti: <span id="score-txt">0</span></div>
+
+    <div id="start-screen" class="screen active">
+        <h1>Ciao Bi! ❤️</h1>
+        <p>Ho preparato per te una sfida a 5 livelli.</p>
+        <p>Per arrivare alle sfide finali, devi passare tutte le sfide!</p>
+        <button onclick="goToInstructions()">INIZIA LIVELLO 1</button>
+    </div>
+
+    <div id="info-screen" class="screen">
+        <h2 id="info-title">Livello X</h2>
+        <div id="info-desc" style="background:#fff0f5; padding:20px; border-radius:15px; border: 2px solid var(--primary);">...</div>
+        <button id="start-lvl-btn" onclick="startActualLevel()">GIOCA ORA!</button>
+    </div>
+
+    <div id="play-field">
+        <div id="basket"></div>
+    </div>
+
+    <div id="dinner-menu" class="screen">
+        <h2>COMPLIMENTI! 🏆</h2>
+        <p>Hai superato i 5 livelli base.</p>
+        <p>Ora vinci le sfide difficili per le cene!</p>
+        <button id="btn-sushi" onclick="prepChallenge('sushi')">🍣 Sfida Sushi</button>
+        <button id="btn-pizza" onclick="prepChallenge('pizza')">🍕 Sfida Pizza</button>
+        <button id="btn-ristorante" onclick="prepChallenge('ristorante')">🍷 Sfida Ristorante</button>
+        <button id="claim-btn" style="display:none; background:gold; color:black; margin-top:20px;" onclick="showFinalWin()">SCELGO IL PREMIO 🎁</button>
+    </div>
+
+    <div id="challenge-screen" class="screen">
+        <h2 id="chal-title">Titolo</h2>
+        <p id="chal-instr">Istruzioni</p>
+        <div id="arena"></div>
+        <button id="action-btn">AZIONE!</button>
+    </div>
+
+    <div id="win-screen" class="screen">
+        <h1>❤️ SEI FANTASTICA ❤️</h1>
+        <div id="final-list"></div>
+        <button onclick="location.reload()">Ricomincia</button>
+    </div>
+</div>
+
+<script>
+    let state = {
+        lvl: 1,
+        score: 0,
+        isLevelActive: false,
+        won: { sushi: false, pizza: false, ristorante: false },
+        gameLoop: null
+    };
+
+    const levelData = {
+        1: { desc: "<b>CADUTA LIBERA</b><br>Raccogli 5 cuori con la base rosa. Muoviti con il mouse o il dito!", target: 5 },
+        2: { desc: "<b>PIÙ VELOCE!</b><br>Brava! Ora i cuori cadono più rapidi. Raccogline 10!", target: 10 },
+        3: { desc: "<b>CLICK RAPIDO</b><br>Niente base! Clicca i cuori che appaiono e spariscono. Raccogline 10!", target: 10 },
+        4: { desc: "<b>RIFLESSI D'ACCIAIO</b><br>Ancora più veloci! Cliccane 15 per passare al prossimo!", target: 15 },
+        5: { desc: "<b>ATTENZIONE!</b><br>Livello finale: raccogli i cuori ma evita le nuvole ☁️! Target: 10", target: 10 }
+    };
+
+    function hideAllScreens() {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById('play-field').style.display = 'none';
+        document.getElementById('hud').style.display = 'none';
+    }
+
+    function goToInstructions() {
+        state.isLevelActive = false;
+        clearInterval(state.gameLoop);
+        hideAllScreens();
+
+        const info = document.getElementById('info-screen');
+        info.classList.add('active');
+        document.getElementById('info-title').innerText = "LIVELLO " + state.lvl;
+        document.getElementById('info-desc').innerHTML = levelData[state.lvl].desc;
+        document.getElementById('start-lvl-btn').innerText = "INIZIA LIVELLO " + state.lvl;
+    }
+
+    function startActualLevel() {
+        hideAllScreens();
+        document.getElementById('play-field').style.display = 'block';
+        document.getElementById('hud').style.display = 'block';
+
+        state.score = 0;
+        state.isLevelActive = true;
+        updateHUD();
+
+        // Pulizia oggetti residui
+        document.querySelectorAll('.obj').forEach(o => o.remove());
+
+        runLevelLogic();
+    }
+
+    function updateHUD() {
+        document.getElementById('lvl-txt').innerText = state.lvl;
+        document.getElementById('score-txt').innerText = state.score + " / " + levelData[state.lvl].target;
+    }
+
+    function runLevelLogic() {
+        const field = document.getElementById('play-field');
+        const currentTarget = levelData[state.lvl].target;
+        const basket = document.getElementById('basket');
+
+        // Gestione Base Rosa (Livelli 1, 2, 5)
+        basket.style.display = (state.lvl <= 2 || state.lvl === 5) ? 'flex' : 'none';
+
+        state.gameLoop = setInterval(() => {
+            if (!state.isLevelActive) return;
+
+            const obj = document.createElement('div');
+            obj.className = 'obj';
+
+            if (state.lvl <= 2 || state.lvl === 5) {
+                // MODALITÀ CADUTA
+                let isBad = (state.lvl === 5 && Math.random() > 0.3);
+                obj.innerHTML = isBad ? '☁️' : '❤️';
+                obj.style.left = Math.random() * 80 + 10 + '%';
+                obj.style.top = '-50px';
+                field.appendChild(obj);
+
+                let pos = -50;
+                let fall = setInterval(() => {
+                    if (!state.isLevelActive) { clearInterval(fall); obj.remove(); return; }
+                    pos += (2 + state.lvl);
+                    obj.style.top = pos + 'px';
+
+                    let bRect = basket.getBoundingClientRect();
+                    let oRect = obj.getBoundingClientRect();
+
+                    if (oRect.bottom >= bRect.top && oRect.right >= bRect.left && oRect.left <= bRect.right) {
+                        if (isBad) {
+                            state.score = Math.max(0, state.score - 2);
+                        } else {
+                            state.score++;
+                        }
+                        updateHUD();
+                        clearInterval(fall); obj.remove();
+                        checkWin(currentTarget);
+                    }
+                    if (pos > 600) { clearInterval(fall); obj.remove(); }
+                }, 20);
+            } else {
+                // MODALITÀ CLICK
+                obj.innerHTML = '💖';
+                obj.style.left = Math.random() * 70 + 15 + '%';
+                obj.style.top = Math.random() * 60 + 20 + '%';
+                obj.onclick = (e) => {
+                    e.stopPropagation();
+                    state.score++;
+                    updateHUD();
+                    obj.remove();
+                    checkWin(currentTarget);
+                };
+                field.appendChild(obj);
+                setTimeout(() => { if(obj) obj.remove(); }, 1800 - (state.lvl * 250));
+            }
+        }, 1100 - (state.lvl * 80));
+    }
+
+    function checkWin(target) {
+        if (state.score >= target && state.isLevelActive) {
+            state.isLevelActive = false;
+            clearInterval(state.gameLoop);
+
+            setTimeout(() => {
+                document.querySelectorAll('.obj').forEach(o => o.remove());
+                if (state.lvl < 5) {
+                    state.lvl++;
+                    goToInstructions();
+                } else {
+                    goToDinnerMenu();
+                }
+            }, 500);
+        }
+    }
+
+    function goToDinnerMenu() {
+        hideAllScreens();
+        document.getElementById('dinner-menu').classList.add('active');
+    }
+
+    // Input Mouse/Touch per il basket
+    document.getElementById('play-field').addEventListener('mousemove', (e) => {
+        let x = e.clientX - document.getElementById('game-box').offsetLeft;
+        if (x > 40 && x < 360) document.getElementById('basket').style.left = x + 'px';
+    });
+
+    // --- SFIDE FINALI (SUSHI, PIZZA, RESTO) ---
+    function prepChallenge(type) {
+        hideAllScreens();
+        const screen = document.getElementById('challenge-screen');
+        const arena = document.getElementById('arena');
+        const btn = document.getElementById('action-btn');
+        arena.innerHTML = "";
+        screen.classList.add('active');
+        btn.onclick = null; // Reset
+
+        if(type === 'sushi') {
+            document.getElementById('chal-title').innerText = "🍣 Test Riflessi";
+            document.getElementById('chal-instr').innerText = "Clicca il Sushi appena appare! Sii fulminea!";
+            setTimeout(() => {
+                const fish = document.createElement('div');
+                fish.innerHTML = "🍣"; fish.style.cssText = `font-size:60px; position:absolute; top:40%; left:40%; cursor:pointer;`;
+                arena.appendChild(fish);
+                let hit = false;
+                fish.onclick = () => { hit = true; winFinal(type); };
+                setTimeout(() => { if(!hit) { alert("Ops! Troppo lenta! Riprova!"); goToDinnerMenu(); } }, 450);
+            }, 1000 + Math.random()*2000);
+        } else if(type === 'pizza') {
+            document.getElementById('chal-title').innerText = "🍕 Precisione Pizza";
+            document.getElementById('chal-instr').innerText = "Ferma la barra nella zona verde!";
+            const zone = document.createElement('div'); zone.className = "safe-zone";
+            let targetPos = 20 + Math.random()*60;
+            zone.style.left = targetPos + "%"; zone.style.width = "7%";
+            const bar = document.createElement('div'); bar.className = "moving-bar";
+            arena.appendChild(zone); arena.appendChild(bar);
+            let pos = 0, dir = 4;
+            let anim = setInterval(() => {
+                pos += dir; if(pos > 98 || pos < 0) dir *= -1;
+                bar.style.left = pos + "%";
+            }, 10);
+            btn.onclick = () => {
+                clearInterval(anim);
+                if(pos >= targetPos && pos <= targetPos + 7) winFinal(type);
+                else { alert("Fuori bersaglio! Riprova!"); goToDinnerMenu(); }
+            };
+        } else if(type === 'ristorante') {
+            document.getElementById('chal-title').innerText = "🍷 Speed Click";
+            let clicks = 0;
+            document.getElementById('chal-instr').innerText = "Clicca il bicchiere 35 volte in 5 secondi!";
+            const glass = document.createElement('div'); glass.innerHTML = "🍷"; glass.style.cssText = "font-size:80px; margin-top:50px; cursor:pointer;";
+            arena.appendChild(glass);
+            let timerStart = false;
+            btn.onclick = () => {
+                if(!timerStart) {
+                    timerStart = true;
+                    setTimeout(() => {
+                        if(clicks >= 35) winFinal(type);
+                        else { alert("Troppo lenta! Riprova!"); goToDinnerMenu(); }
+                    }, 5000);
+                }
+                clicks++; glass.style.transform = `scale(${1 + clicks/50})`;
+            };
+        }
+    }
+
+    function winFinal(type) {
+        state.won[type] = true;
+        document.getElementById('btn-' + type).style.background = "#4caf50";
+        document.getElementById('btn-' + type).innerText = type.toUpperCase() + " VINTO! ✅";
+        alert("GRANDE! Cena vinta!");
+        goToDinnerMenu();
+    }
+
+    function showFinalWin() {
+        hideAllScreens();
+        document.getElementById('win-screen').classList.add('active');
+        const list = document.getElementById('final-list');
+        let html = "<h3>Premi riscattati:</h3><ul style='list-style:none; padding:0; font-size:1.2em;'>";
+        if(state.won.sushi) html += "<li>🍣 Cena Sushi</li>";
+        if(state.won.pizza) html += "<li>🍕 Serata Pizza</li>";
+        if(state.won.ristorante) html += "<li>🍷 Ristorante Elegante</li>";
+        html += "</ul><p><b>Sarà una serata bellissima! ❤️</b></p>";
+        list.innerHTML = html;
+    }
+</script>
+</body>
+</html>
